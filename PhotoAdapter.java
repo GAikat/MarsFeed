@@ -46,14 +46,15 @@ public class PhotoAdapter extends ArrayAdapter<Photo> {
 
         if(row == null){
             inflater = LayoutInflater.from(context);
-             //= ((Activity) context).getLayoutInflater();
             row = inflater.inflate(layoutResourceId, parent, false);
         }
 
         TextView date = (TextView) row.findViewById(R.id.dateTextView);
+        TextView camera = (TextView) row.findViewById(R.id.cameraTextView);
         ImageView image = (ImageView) row.findViewById(R.id.imageView);
 
         date.setText(data.get(position).getDate());
+        camera.setText(data.get(position).getCamera());
         loadBitmap(data.get(position).getUrl(), image);
 
 
