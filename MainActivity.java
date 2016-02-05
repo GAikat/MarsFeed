@@ -1,25 +1,18 @@
 package uk.co.gaik.marsfeed;
 
-import com.android.volley.Request;
-import com.android.volley.RequestQueue;
-import com.android.volley.Response;
-import com.android.volley.VolleyError;
-import com.android.volley.toolbox.StringRequest;
-import com.android.volley.toolbox.Volley;
-import com.google.android.gms.ads.AdRequest;
-import com.google.android.gms.ads.AdView;
-
 import android.app.DatePickerDialog;
 import android.app.Dialog;
 import android.app.DialogFragment;
+import android.app.ProgressDialog;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Point;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
+import android.util.Log;
 import android.util.LruCache;
 import android.view.Display;
-import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
@@ -30,6 +23,19 @@ import android.widget.DatePicker;
 import android.widget.ListView;
 import android.widget.Spinner;
 import android.widget.Toast;
+
+import com.android.volley.Request;
+import com.android.volley.RequestQueue;
+import com.android.volley.Response;
+import com.android.volley.VolleyError;
+import com.android.volley.toolbox.StringRequest;
+import com.android.volley.toolbox.Volley;
+import com.google.android.gms.ads.AdRequest;
+import com.google.android.gms.ads.AdView;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -42,23 +48,46 @@ public class MainActivity extends AppCompatActivity {
     private static final String TOAST_TEXT = "Test ads are being shown. "
             + "To show live ads, replace the ad unit ID in res/values/strings.xml with your own ad unit ID.";
 
+    // JSON Node names
+    private static final String TAG_PHOTOS = "photos";
+    private static final String TAG_ID = "id";
+    private static final String TAG_SOL = "sol";
+    private static final String TAG_CAMERA = "camera";
+    private static final String TAG_NAME = "name";
+    private static final String TAG_ROVER_ID = "rover_id";
+    private static final String TAG_FULL_NAME = "full_name";
+    private static final String TAG_IMAGE = "img_src";
+    private static final String TAG_EARTH_DATE = "earth_date";
+    private static final String TAG_ROVER = "rover";
+    private static final String TAG_LANDING_DATE = "landing_date";
+    private static final String TAG_MAX_SOL = "max_sol";
+    private static final String TAG_MAX_DATE = "max_date";
+    private static final String TAG_TOTAL_PHOTOS = "total_photos";
+    private static final String TAG_CAMERAS = "cameras";
+
+    // photos JSONArray
+    JSONArray photosJSON = null;
+
     // Memory LRU Cache
     public static LruCache<String, Bitmap> mMemoryCache;
+
+    public static RequestQueue queue;
+    public static GetPhotos getPhotos;
 
     public static String url;
     public static String maxEarthDate;
     public static String selectedDate;
     public static String selectedRover = "Curiosity";
-    ArrayList<Photo> photos = new ArrayList<Photo>();
-    //ArrayList<CharSequence> cameras = new ArrayList<>();
+    public static ArrayList<Photo> photos = new ArrayList<Photo>();
 
     // UI widgets
+    private ProgressDialog pDialog;
+
     Spinner mRoversSpinner;
     public static Button dateButton;
-    //Spinner mCameraSpinner;
     ListView photosListView;
 
-    PhotoAdapter photoAdapter;
+    public static PhotoAdapter photoAdapter;
 
     public static int screenWidth;
     public static int screenHeight;
@@ -78,6 +107,7 @@ public class MainActivity extends AppCompatActivity {
 
         // saving the application context for use in the PhotoAdapter
         context = getApplicationContext();
+        getPhotos = new GetPhotos();
 
         // Get the max available VM memory
         final int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
@@ -96,43 +126,15 @@ public class MainActivity extends AppCompatActivity {
         photosListView = (ListView) findViewById(R.id.photosListView);
         mRoversSpinner = (Spinner) findViewById(R.id.roversSpinner);
         dateButton = (Button) findViewById(R.id.dateButton);
-        //mCameraSpinner = (Spinner) findViewById(R.id.cameraSpinner);
 
         photoAdapter = new PhotoAdapter(getApplicationContext(), R.layout.photo_list_item, photos);
         photosListView.setAdapter(photoAdapter);
-        View footerView =  ((LayoutInflater)context.getSystemService(Context.LAYOUT_INFLATER_SERVICE)).inflate(R.layout.footer, null, false);
-        photosListView.addFooterView(footerView);
-        View emptyView =  ((LayoutInflater)context.getSystemService(Context.LAYOUT_INFLATER_SERVICE)).inflate(R.layout.empty_list, null, false);
-        photosListView.setEmptyView(emptyView);
+        photosListView.setEmptyView(findViewById(R.id.empty_list_item));
 
         // Instantiate the RequestQueue.
-        final RequestQueue queue = Volley.newRequestQueue(this);
+        queue = Volley.newRequestQueue(this);
 
         url ="https://api.nasa.gov/mars-photos/api/v1/rovers/"+selectedRover+"/photos?sol=1&api_key=DEMO_KEY";
-
-        // Request a string response from the provided URL.
-        /* mallon peritto
-        final StringRequest stringRequest = new StringRequest(Request.Method.GET, url,
-            new Response.Listener<String>() {
-                @Override
-                public void onResponse(String response) {
-                    // Parse max earth date
-                    parseMaxDate(response, queue);
-                }
-            }, new Response.ErrorListener() {
-            @Override
-            public void onErrorResponse(VolleyError error) {
-                // There is a problem with the connection.
-                Toast.makeText(getApplicationContext(), "Communication with Mars failed!", Toast.LENGTH_LONG).show();
-                if(dateButton.getText().toString().equals("")){
-                    dateButton.setText("Select Date");
-                }
-                View footerView = ((LayoutInflater) context.getSystemService(Context.LAYOUT_INFLATER_SERVICE)).inflate(R.layout.footer, null, false);
-                photosListView.removeFooterView(footerView);
-            }
-        });
-        queue.add(stringRequest); */
-
 
         ArrayAdapter<CharSequence> roversAdapter = ArrayAdapter.createFromResource(this,
                 R.array.rovers_array, android.R.layout.simple_spinner_item);
@@ -142,36 +144,9 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                 selectedRover = parent.getSelectedItem().toString();
-                photos.clear();
-                photoAdapter.notifyDataSetChanged();
+                selectedDate = "";
 
-                // get the max earth date for this rover
-                url = "https://api.nasa.gov/mars-photos/api/v1/rovers/" + selectedRover + "/photos?sol=1&api_key=DEMO_KEY";
-                final StringRequest stringRequest = new StringRequest(Request.Method.GET, url,
-                    new Response.Listener<String>() {
-                        @Override
-                        public void onResponse(String response) {
-                            parseMaxDate(response, queue);
-                        }
-                    }, new Response.ErrorListener() {
-                    @Override
-                    public void onErrorResponse(VolleyError error) {
-                        // There is a problem with the connection.
-                        Toast.makeText(getApplicationContext(), "Communication with Mars failed!", Toast.LENGTH_LONG).show();
-                        if(dateButton.getText().toString().equals("")){
-                            dateButton.setText("");
-                            dateButton.setEnabled(false);
-                        }
-                        //View footerView = ((LayoutInflater) context.getSystemService(Context.LAYOUT_INFLATER_SERVICE)).inflate(R.layout.footer, null, false);
-                        //photosListView.removeFooterView(footerView);
-                    }
-                });
-                queue.add(stringRequest);
-
-                // use the max earth date to send a request and populate the list
-                //url = "https://api.nasa.gov/mars-photos/api/v1/rovers/" + selectedRover + "/photos?earth_date="+maxEarthDate+"&api_key=DEMO_KEY";
-                //MyStringRequest request = new MyStringRequest();
-                //queue.add(request.request);
+                updateList(queue);
             }
 
             @Override
@@ -179,22 +154,6 @@ public class MainActivity extends AppCompatActivity {
 
             }
         });
-
-        /*ArrayAdapter<CharSequence> cameraAdapter = ArrayAdapter.createFromResource(this,
-                , android.R.layout.simple_spinner_item);
-        cameraAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        mCameraSpinner.setAdapter(cameraAdapter);
-        mCameraSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-
-            }
-        });*/
 
         // Load an ad into the AdMob banner view.
         AdView adView = (AdView) findViewById(R.id.adView);
@@ -206,6 +165,11 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
     }
 
     @Override
@@ -229,68 +193,137 @@ public class MainActivity extends AppCompatActivity {
         return super.onOptionsItemSelected(item);
     }
 
-    // Parses the JSON response from the HTTP request
-    private void parse(String response){
-        String[] tokens = response.split("\\{\"photos\":\\[");
+    /**
+     * Function used to communicate with the NASA Api, get the JSON response and parse it and show it to the user
+     **/
+    public static void updateList(RequestQueue queue){
+        photos.clear();
+        photoAdapter.notifyDataSetChanged();
 
-        // contains No Results
-        if(tokens[0].contains("error") || (tokens.length > 1 && tokens[1].equals("]}"))){
-            // Do nothing - Go to the last part of the function
+        if(selectedDate.equals("")) {
+            url = "https://api.nasa.gov/mars-photos/api/v1/rovers/" + selectedRover + "/photos?sol=1&api_key=DEMO_KEY";
         }
-        else {
-            // split at camera if in need on showing it
-            String[] tokens2 = tokens[1].split("\"\\},\"img_src\":\"");
-
-            String[] cameraTokens = tokens2[0].split("camera");
-            String[] cameraTokens2 = cameraTokens[cameraTokens.length-1].split("full_name\":\"");
-            String camera = cameraTokens2[cameraTokens2.length-1];
-            Photo p = new Photo();
-            p.setCamera(camera);
-            photos.add(p);
-
-            // start from 1 - avoid useless info
-            for (int i = 1; i < tokens2.length; i++) {
-                String tok = tokens2[i];
-                String[] tokens3 = tok.split("\",\"earth_date\":\"");
-                String url = tokens3[0];
-                String[] tokens4 = tokens3[1].split("\",\"rover");
-                String date = tokens4[0];
-
-                p = photos.get(photos.size()-1);
-                photos.set(photos.size()-1, p);
-            }
+        else{
+            url = "https://api.nasa.gov/mars-photos/api/v1/rovers/" + selectedRover + "/photos?earth_date=" + selectedDate + "&api_key=DEMO_KEY";
         }
 
-        // Add/remove footer and empty view
-        if(photos.size()%25 != 0 || photos.size() == 0){
-            View footerView =  ((LayoutInflater)context.getSystemService(Context.LAYOUT_INFLATER_SERVICE)).inflate(R.layout.footer, null, false);
-            photosListView.removeFooterView(footerView);
-        }
+        final StringRequest stringRequest = new StringRequest(Request.Method.GET, url,
+            new Response.Listener<String>() {
+                @Override
+                public void onResponse(String response) {
+                    getPhotos.execute(response);
+                }
+            }, new Response.ErrorListener() {
+                @Override
+                public void onErrorResponse(VolleyError error) {
+                    // There is a problem with the connection.
+                    Toast.makeText(context, "Communication with Mars failed!", Toast.LENGTH_LONG).show();
+                    if(dateButton.getText().toString().equals("")){
+                        dateButton.setText("");
+                        dateButton.setEnabled(false);
+                    }
+                }
+            });
+        queue.add(stringRequest);
     }
 
-    // Parses the JSON response from the HTTP request
-    private void parseMaxDate(String response, RequestQueue queue){
-        String[] tokens = response.split("max_date\":\"");
-        String[] tokens2 = tokens[1].split("\",\"");
-        maxEarthDate = tokens2[0];
-        selectedDate = maxEarthDate;
-        dateButton.setText(maxEarthDate);
-        StringRequest request = new StringRequest(Request.Method.GET, url = "https://api.nasa.gov/mars-photos/api/v1/rovers/" + selectedRover + "/photos?earth_date="+selectedDate+"&api_key=DEMO_KEY",
-                new Response.Listener<String>() {
-                    @Override
-                    public void onResponse(String response) {
-                        // Parser
-                        parse(response);
-                        photoAdapter.notifyDataSetChanged();
+    /**
+     * Async task class to parse the json response and fill the ArrayList with photos
+     * */
+    private class GetPhotos extends AsyncTask<String, Void, String> {
+
+        @Override
+        protected void onPreExecute() {
+            super.onPreExecute();
+            // Showing progress dialog
+            pDialog = new ProgressDialog(MainActivity.this);
+            pDialog.setMessage("Contacting NASA...");
+            pDialog.setCancelable(false);
+            pDialog.show();
+
+        }
+
+        @Override
+        protected String doInBackground(String... arg0) {
+            // Creating service handler class instance
+            //ServiceHandler sh = new ServiceHandler();
+
+            // Making a request to url and getting response
+            String jsonStr = arg0[0]; //sh.makeServiceCall(url, ServiceHandler.GET);
+
+            Log.d("Response: ", "> " + jsonStr);
+
+            if (jsonStr != null) {
+                try {
+                    JSONObject jsonObj = new JSONObject(jsonStr);
+
+                    // Getting JSON Array node
+                    photosJSON = jsonObj.getJSONArray(TAG_PHOTOS);
+
+                    // looping through All Contacts
+                    for (int i = 0; i < photosJSON.length(); i++) {
+                        JSONObject photo = photosJSON.getJSONObject(i);
+
+                        String id = photo.getString(TAG_ID);
+                        String sol = photo.getString(TAG_SOL);
+
+                        JSONObject camera = photo.getJSONObject(TAG_CAMERA);
+                        String camId = camera.getString(TAG_ID);
+                        String camName = camera.getString(TAG_NAME);
+                        String camRoverId = camera.getString(TAG_ROVER_ID);
+                        String camFullName = camera.getString(TAG_FULL_NAME);
+                        Camera cam = new Camera(camId, camName, camRoverId, camFullName);
+                        String imgSrc = photo.getString(TAG_IMAGE);
+                        String earthDate = photo.getString(TAG_EARTH_DATE);
+                        selectedDate = earthDate;
+
+                        JSONObject rover = photo.getJSONObject(TAG_ROVER);
+                        String roverId = rover.getString(TAG_ID);
+                        String roverName = rover.getString(TAG_NAME);
+                        String roverLandingDate = rover.getString(TAG_LANDING_DATE);
+                        String roverMaxSol = rover.getString(TAG_MAX_SOL);
+                        String roverMaxDate = rover.getString(TAG_MAX_DATE);
+                        maxEarthDate = roverMaxDate;
+                        String roverTotalPhotos = rover.getString(TAG_TOTAL_PHOTOS);
+                        JSONArray roverCameras = rover.getJSONArray(TAG_CAMERAS);
+                        ArrayList<RoverCamera> roverCamerasList = new ArrayList<>();
+                        for(int j = 0; j < roverCameras.length(); j++){
+                            JSONObject c = roverCameras.getJSONObject(j);
+
+                            String cName = c.getString(TAG_NAME);
+                            String cFullName = c.getString(TAG_FULL_NAME);
+
+                            roverCamerasList.add(new RoverCamera(cName, cFullName));
+                        }
+                        Rover r = new Rover(roverId, roverName, roverLandingDate, roverMaxSol, roverMaxDate, roverTotalPhotos, roverCamerasList);
+                        Photo p = new Photo(id, sol, cam, imgSrc, earthDate, r);
+                        photos.add(p);
                     }
-                }, new Response.ErrorListener() {
-            @Override
-            public void onErrorResponse(VolleyError error) {
-                // There is a problem with the connection.
-                Toast.makeText(MainActivity.context, "Communication with Mars failed!", Toast.LENGTH_LONG).show();
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                }
+            } else {
+                Log.e("ServiceHandler", "Couldn't get any data from the url");
             }
-        });
-        queue.add(request);
+
+            return null;
+        }
+
+        @Override
+        protected void onPostExecute(String result) {
+            super.onPostExecute(result);
+            dateButton.setText(selectedDate);
+            // Dismiss the progress dialog
+            if (pDialog.isShowing())
+                pDialog.dismiss();
+
+            /**
+             * Updating parsed JSON data into ListView
+             * */
+            photoAdapter.notifyDataSetChanged();
+            getPhotos = new GetPhotos();
+        }
+
     }
 
     public static class DatePickerFragment extends DialogFragment
@@ -309,7 +342,8 @@ public class MainActivity extends AppCompatActivity {
         }
 
         public void onDateSet(DatePicker view, int year, int month, int day) {
-            dateButton.setText(year+"-"+(month+1)+"-"+day);
+            selectedDate = year+"-"+(month+1)+"-"+day;
+            updateList(queue);
         }
     }
 

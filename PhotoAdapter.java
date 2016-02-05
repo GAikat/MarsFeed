@@ -1,6 +1,5 @@
 package uk.co.gaik.marsfeed;
 
-import android.app.Activity;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
@@ -8,14 +7,12 @@ import android.graphics.BitmapFactory;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.AsyncTask;
-import android.renderscript.ScriptGroup;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.ImageView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import java.io.InputStream;
 import java.lang.ref.WeakReference;
@@ -53,9 +50,9 @@ public class PhotoAdapter extends ArrayAdapter<Photo> {
         TextView camera = (TextView) row.findViewById(R.id.cameraTextView);
         ImageView image = (ImageView) row.findViewById(R.id.imageView);
 
-        date.setText(data.get(position).getDate());
-        camera.setText(data.get(position).getCamera());
-        loadBitmap(data.get(position).getUrl(), image);
+        date.setText(data.get(position).earthDate);
+        camera.setText(data.get(position).cam.full_name);
+        loadBitmap(data.get(position).imgSrc, image);
 
 
         return row;
